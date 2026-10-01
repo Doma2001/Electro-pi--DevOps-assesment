@@ -1,351 +1,368 @@
-# Electro-pi--DevOps-assesment
-# Cloud / DevOps Technical Assessment
+# Electro-pi Containerized Application Deployment on AWS
 
-A small three-tier web application demonstrating Infrastructure as Code, containerization, CI/CD, secrets management, and basic monitoring on AWS.
+## 1. Project Overview
 
-The application consists of a static HTML/JavaScript frontend, a FastAPI backend, and a PostgreSQL database. Terraform provisions the AWS infrastructure, Docker packages the API, and GitHub Actions tests and deploys changes pushed to `main`.
+This project demonstrates how to deploy a containerized application on AWS using Infrastructure as Code (IaC), container orchestration, and CI/CD automation.
 
-> **Assessment scope:** This repository focuses on infrastructure and automation rather than application features. Review the configuration and estimated AWS costs before deploying. The Terraform configuration includes resources that can incur charges.
+To design the deployment architecture, I researched AWS best practices for deploying containerized applications and referred to the following AWS article:
 
-## Contents
+**Reference:** [Fast Forward on Your First Serverless Container Deployment on AWS](https://aws.amazon.com/blogs/containers/fast-forward-on-your-first-serverless-container-deployment-on-aws/)
 
-- [Architecture](#architecture)
-- [Technology stack](#technology-stack)
-- [Repository structure](#repository-structure)
-- [Run locally](#run-locally)
-- [Deploy to AWS](#deploy-to-aws)
-- [CI/CD pipeline](#cicd-pipeline)
-- [Security](#security)
-- [Logging and monitoring](#logging-and-monitoring)
-- [Key decisions and trade-offs](#key-decisions-and-trade-offs)
-- [Production considerations](#production-considerations)
-- [Cleanup](#cleanup)
-- [Troubleshooting](#troubleshooting)
+Based on these recommendations, I designed an architecture with some modifications to meet the requirements of this assessment.
 
-## Architecture
+## 2. Architecture
 
-```mermaid
-flowchart TD
-    User[User's browser] -->|HTTP| Frontend[S3 static website]
-    User -->|HTTP API requests| ALB[Application Load Balancer]
-    Frontend -->|Calls API URL| ALB
-    ALB -->|Port 8000| ECS[ECS Fargate service]
-    ECS -->|Port 5432| RDS[(RDS PostgreSQL)]
-    ECS --> Secrets[AWS Secrets Manager]
-    ECS --> Logs[CloudWatch Logs]
-    ECS --> Metrics[CloudWatch CPU alarm]
-    GH[GitHub Actions] -->|OIDC role assumption| IAM[AWS IAM role]
-    GH -->|Push image| ECR[Amazon ECR]
-    GH -->|Update service| ECS
-    GH -->|Publish static files| Frontend
-```
+### 2.1 Proposed Architecture
 
-### Request flow
+The following diagram illustrates the proposed architecture, inspired by AWS best practices, with modifications specific to this project.
 
-1. The browser loads the static frontend from the S3 website endpoint.
-2. The frontend sends API requests to the Application Load Balancer (ALB).
-3. The ALB forwards requests to the FastAPI container running on Amazon ECS with AWS Fargate.
-4. The API reads and writes items in the managed PostgreSQL database on Amazon RDS.
-5. Database connection settings are provided to the ECS task through AWS Secrets Manager.
-6. Container logs are sent to CloudWatch Logs, and a CloudWatch alarm monitors ECS service CPU utilization.
+<!-- IMAGE PLACEHOLDER 1: Proposed Architecture -->
 
-The current configuration uses HTTP endpoints for the assessment. HTTPS and a custom domain should be added before production use.
+### 2.2 Full Cloud Architecture
 
-## Technology stack
+The following diagram presents the full architecture implemented for the cloud deployment, including the AWS services and deployment workflow.
 
-| Area | Technology |
-|---|---|
-| Frontend | HTML, CSS, vanilla JavaScript |
-| API | Python 3.12, FastAPI, Uvicorn |
-| Database | PostgreSQL 16 (RDS in AWS; PostgreSQL container locally) |
-| Containers | Docker, Docker Compose |
-| Infrastructure as Code | Terraform |
-| Compute | Amazon ECS Fargate |
-| Container registry | Amazon ECR |
-| Static hosting | Amazon S3 website hosting |
-| CI/CD | GitHub Actions |
-| Secrets | AWS Secrets Manager and GitHub OIDC |
-| Monitoring/logging | Amazon CloudWatch |
+<!-- IMAGE PLACEHOLDER 2: Full Cloud Architecture -->
 
-## Repository structure
+> **Note:** Replace the image filenames above with the actual filenames of your diagrams. Keep the images in the repository root or update the paths accordingly.
 
-```text
-.
-├── .env.example                  # Example local environment variables (review format before use)
-├── .github/
-│   └── workflows/
-│       └── deploy.yml            # Test, build, push, and deploy workflow
-├── app/
-│   ├── .dockerignore              # Excludes unnecessary files from Docker build context
-│   ├── Dockerfile                 # Multi-stage API container build; runs as non-root
-│   ├── main.py                    # FastAPI routes and PostgreSQL access
-│   ├── requirements.txt           # Runtime Python dependencies
-│   ├── requirements-dev.txt       # Test/development dependencies
-│   └── test_main.py               # Basic API and CORS tests
-├── frontend/
-│   ├── index.html                 # Static UI
-│   ├── app.js                     # Health check and item list/create requests
-│   └── config.js                  # API base URL configuration
-├── terraform/
-│   ├── versions.tf                # Terraform/provider version constraints
-│   ├── provider.tf                # AWS provider, region, default tags, data sources
-│   ├── variables.tf               # Configurable input variables
-│   ├── terraform.tfvars.example   # Example deployment values
-│   ├── network.tf                 # VPC, public/private subnets, routes, internet gateway
-│   ├── security.tf                # ALB, ECS, and database security groups
-│   ├── compute.tf                 # ECR, ECS/Fargate, ALB, target group, log group
-│   ├── database.tf                # RDS PostgreSQL, generated password, Secrets Manager secret
-│   ├── iam.tf                     # ECS roles and GitHub Actions OIDC deployment role
-│   ├── storage.tf                 # S3 frontend website and bucket policy
-│   ├── monitoring.tf               # CloudWatch CPU utilization alarm
-│   └── outputs.tf                 # URLs and resource identifiers
-├── docker-compose.yml             # Local API and PostgreSQL stack
-└── README.md
-```
+## 3. Technology Stack
 
-## Run locally
+| Area                       | Technology                                                     |
+| -------------------------- | -------------------------------------------------------------- |
+| Frontend                   | HTML, CSS, Vanilla JavaScript                                  |
+| API                        | Python 3.12, FastAPI, Uvicorn                                  |
+| Database                   | PostgreSQL 16, Amazon RDS in AWS, PostgreSQL container locally |
+| Containers                 | Docker, Docker Compose                                         |
+| Infrastructure as Code     | Terraform                                                      |
+| Compute                    | Amazon ECS with AWS Fargate                                    |
+| Container Registry         | Amazon Elastic Container Registry (ECR)                        |
+| Static Hosting             | Amazon S3 website hosting                                      |
+| CI/CD                      | GitHub Actions                                                 |
+| Secrets and Authentication | AWS Secrets Manager, GitHub OIDC                               |
+| Monitoring and Logging     | Amazon CloudWatch                                              |
+
+## 4. Running the Application Locally
+
+Before exploring the cloud architecture, you can run the application locally using Docker Desktop.
 
 ### Prerequisites
 
-- Docker and Docker Compose v2
-- Alternatively, Python 3.12 and a local PostgreSQL 16 instance
+* Docker Desktop with Docker Compose.
+* Python 3 installed.
+* Git.
 
-### Option 1: Docker Compose
+### Step 1 — Configure the Frontend
 
-Create a `.env` file in the repository root. The Compose file expects standard `KEY=value` environment-variable syntax; check `.env.example` and use values like these:
+Open `frontend/config.js` and change the API base URL from:
 
-```dotenv
-POSTGRES_DB=assessment
-POSTGRES_USER=assessment
-POSTGRES_PASSWORD=local-only-change-me
+```javascript
+API_BASE_URL: "__API_BASE_URL__"
 ```
 
-Start the application:
+to:
+
+```javascript
+API_BASE_URL: "http://localhost:8000"
+```
+
+This configures the frontend to communicate with the locally running backend.
+
+### Step 2 — Build and Start the Containers
+
+From the project root directory, run:
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-The API is available at `http://localhost:8000`.
+This command builds the required images and starts the database and backend containers defined in the Docker Compose configuration.
 
-- Health check: `http://localhost:8000/api/health`
-- List items: `http://localhost:8000/api/items`
-- Frontend: open `frontend/index.html` in a browser. The default API URL in `frontend/app.js` is `http://localhost:8000`.
+### Step 3 — Verify Container Health
 
-The Compose file starts PostgreSQL and the API; it does **not** serve the frontend through a web server. If browser restrictions prevent opening the HTML file directly, serve the `frontend/` directory with a local static HTTP server, for example:
+Run:
 
 ```bash
-python -m http.server 8080 --directory frontend
+docker compose ps -a
 ```
 
-Then visit `http://localhost:8080`. The frontend's default API URL is configured in `frontend/config.js`; for local use, set it to `http://localhost:8000`.
-
-Stop the stack:
+Verify that all required containers are running and healthy. If a container is not healthy, inspect its logs:
 
 ```bash
-docker compose down
+docker compose logs
 ```
 
-Remove the local database volume/data if one has been added to your Compose configuration and you intentionally want to reset it. Do not use destructive cleanup commands without checking which data they affect.
+### Step 4 — Start the Frontend
 
-### Option 2: Run the API with Python
-
-Create and activate a virtual environment, then install the dependencies:
+From the project root, run:
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r app/requirements.txt
-pip install -r app/requirements-dev.txt
+cd frontend
+python3 -m http.server 3000
 ```
 
-Set `DATABASE_URL` to a reachable PostgreSQL database, then start the API:
+Open the frontend in your browser:
 
-```bash
-export DATABASE_URL='postgresql://assessment:local-only-change-me@localhost:5432/assessment'
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+**http://localhost:3000**
 
-On Windows PowerShell, use `$env:DATABASE_URL='postgresql://assessment:local-only-change-me@localhost:5432/assessment'` instead of `export`.
+The frontend should now communicate with the backend at `http://localhost:8000`.
 
-### Run tests
+> **Note:** Keep the terminal running while serving the frontend. If the application uses environment-specific configuration, remember to restore or update `frontend/config.js` appropriately before deploying to AWS.
 
-From the repository root:
+## 5. Deploying the Application to AWS
 
-```bash
-pip install -r app/requirements-dev.txt
-cd app
-pytest -q
-```
+The following steps describe how to provision the AWS infrastructure and deploy the application using Terraform and GitHub Actions.
 
-The included tests check the health endpoint and the configured CORS response. They are intentionally small to match the assessment scope.
-
-### API endpoints
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/api/health` | Returns API health status |
-| `GET` | `/api/items` | Lists stored items |
-| `POST` | `/api/items` | Creates an item; request body: `{"name": "Example item"}` |
-
-Example request:
-
-```bash
-curl -X POST http://localhost:8000/api/items \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Example item"}'
-```
-
-## Deploy to AWS
+> **Important — HTTP vs. HTTPS:** This assessment uses HTTP for the public frontend and application endpoints where configured. HTTPS was not implemented because a custom domain and TLS certificate were outside the scope of this assessment. For production deployments, configure HTTPS using AWS Certificate Manager (ACM) and an appropriate domain name.
 
 ### Prerequisites
 
-- An AWS account and credentials with permission to create the resources in this project.
-- AWS CLI configured for the intended account.
-- Terraform `>= 1.6.0`.
-- A GitHub repository containing this project, with the default deployment branch named `main`.
-- An existing GitHub Actions OIDC identity provider in AWS IAM for `https://token.actions.githubusercontent.com`. The Terraform configuration looks up this provider; it does not create it.
-- Review of AWS pricing and the account's eligibility for any free-tier offers.
+Before starting, ensure you have:
 
-The example Terraform variables use `eu-central-1`. Change the region if needed and ensure all resources are supported there.
+* An AWS account with the required permissions.
+* AWS CLI installed and configured.
+* Terraform installed.
+* Git installed.
+* A GitHub repository containing the project.
+* Docker installed for local development and testing.
 
-### 1. Configure Terraform
+### Step 1 — Clone the Repository
 
-From the repository root:
+Clone the project and navigate to its root directory:
+
+```bash
+git clone https://github.com/<your-username>/<your-repo>.git
+cd <your-repo>
+```
+
+Replace the placeholders with your GitHub username and repository name.
+
+### Step 2 — Configure Terraform Variables
+
+Navigate to the Terraform directory:
 
 ```bash
 cd terraform
+```
+
+Create your local Terraform variables file:
+
+```bash
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edit `terraform.tfvars`, especially `github_repo`, so it contains your GitHub repository in `OWNER/REPOSITORY` format. Review `aws_region`, `project_name`, `environment`, database settings, and the desired ECS task count.
+Open `terraform.tfvars` and configure the required values. At minimum, set:
 
-Initialize and review the plan:
+```hcl
+aws_region  = "eu-central-1"
+github_repo = "<your-github-username>/<your-repo-name>"
+```
+
+Make sure the repository value matches your actual GitHub repository.
+
+> **Security note:** Do not commit `terraform.tfvars` if it contains sensitive values. Keep credentials and application secrets out of source control.
+
+### Step 3 — Provision the AWS Infrastructure
+
+Initialize Terraform:
 
 ```bash
 terraform init
-terraform fmt -check
-terraform validate
-terraform plan
 ```
 
-Apply only after reviewing the planned resources and costs:
+Review and apply the infrastructure configuration:
 
 ```bash
 terraform apply
 ```
 
-Terraform creates the VPC/subnets, ALB, ECS cluster/service and task definition, ECR repository, RDS database, S3 website bucket, IAM roles, Secrets Manager secret, CloudWatch log group, and CPU alarm.
+Review the proposed changes and confirm the operation when prompted.
 
-**First deployment note:** the example sets `ecs_desired_count = 0` so the infrastructure can be created before a real container image has been published. The GitHub Actions workflow sets the ECS desired count to `1` when it deploys. The ECS task definition initially contains a placeholder image; the workflow registers a new revision with the built image.
-
-### 2. Configure GitHub Actions
-
-The workflow expects an Actions **repository variable** named `AWS_ROLE_ARN` containing the ARN of the IAM role created for GitHub Actions. Add it under **GitHub repository → Settings → Secrets and variables → Actions → Variables**.
-
-The role trust policy is restricted to the configured repository and the `main` branch. Confirm that the repository identifier in `terraform.tfvars` matches the repository running the workflow, and inspect `terraform/iam.tf` for any repository-specific trust-policy entries before applying.
-
-The workflow uses GitHub's OIDC token to assume the AWS role. It does not require long-lived AWS access keys to be stored in GitHub. Ensure the role has the permissions required by the workflow and Terraform-created resources.
-
-### 3. Trigger deployment
-
-Commit and push the project to `main`:
+After provisioning completes, retrieve the outputs needed for the next steps:
 
 ```bash
-git add .
-git commit -m "Configure cloud DevOps assessment"
+terraform output github_actions_role_arn
+terraform output frontend_website_url
+```
+
+Record the role ARN and frontend URL.
+
+### Step 4 — Configure GitHub Actions Authentication
+
+Register the IAM role ARN as a GitHub Actions repository variable.
+
+1. Copy the output of:
+
+   ```bash
+   terraform output github_actions_role_arn
+   ```
+
+2. Open your GitHub repository.
+
+3. Navigate to **Settings → Secrets and variables → Actions → Variables**.
+
+4. Click **New repository variable**.
+
+5. Set the variable name to:
+
+   ```text
+   AWS_ROLE_ARN
+   ```
+
+6. Paste the IAM role ARN as the value.
+
+7. Save the variable.
+
+This allows GitHub Actions to assume the configured AWS IAM role using OpenID Connect (OIDC), provided the IAM trust policy and workflow permissions are configured correctly.
+
+### Step 5 — Trigger the First Deployment
+
+Return to the repository root:
+
+```bash
+cd ..
+```
+
+Trigger the GitHub Actions workflow by pushing a commit to the `main` branch.
+
+If there are no pending changes to commit, you can create an empty commit:
+
+```bash
+git commit --allow-empty -m "Trigger first deployment"
 git push origin main
 ```
 
-The workflow in `.github/workflows/deploy.yml` runs tests, builds and pushes the API image, registers a new ECS task definition revision, updates the ECS service, waits for service stability, renders the frontend API URL, and syncs the frontend to S3.
+Monitor the workflow under the **Actions** tab in your GitHub repository.
 
-After a successful run, use the Terraform outputs to find the endpoints:
+Wait for the deployment workflow to complete successfully.
+
+### Step 6 — Verify the Deployment
+
+Navigate to the Terraform directory:
 
 ```bash
 cd terraform
-terraform output
 ```
 
-The `backend_api_url` and `frontend_website_url` outputs use HTTP in this assessment configuration.
+Retrieve the frontend URL:
 
-## CI/CD pipeline
+```bash
+terraform output frontend_website_url
+```
 
-The GitHub Actions workflow runs on pushes to `main` and follows this sequence:
+Open the URL in your browser and verify that the frontend loads correctly and can communicate with the backend API.
 
-1. **Checkout:** obtains the repository source.
-2. **Build check:** compiles Python files with `compileall`.
-3. **Test:** runs `pytest`.
-4. **Authenticate:** assumes the AWS deployment role using OIDC.
-5. **Build and publish:** builds the backend Docker image and pushes commit-SHA and `latest` tags to ECR.
-6. **Deploy backend:** registers a task definition revision, updates ECS Fargate, and waits for the service to stabilize.
-7. **Publish frontend:** substitutes the ALB URL into `frontend/config.js` and syncs the static files to S3.
+**Verification checklist:**
 
-Image tags based on the commit SHA provide a traceable reference to the source revision. ECR image scanning on push is enabled, and a lifecycle policy retains the five most recent images.
+* [x] The GitHub Actions workflow completed successfully.
+* [x] The frontend website is accessible.
+* [x] The backend API is reachable through the configured endpoint.
+* [x] The application can communicate with the database.
+* [x] Application and infrastructure logs are available in CloudWatch.
 
-## Security
+Check that the endpoint uses the expected protocol. This assessment is configured for HTTP rather than HTTPS.
 
-The project implements several baseline controls:
+### Step 7 — Tear Down the Infrastructure
 
-- **Network segmentation:** the VPC has public and private subnets. The RDS instance is configured as non-public and placed in private subnets.
-- **Security groups:** inbound HTTP traffic is allowed to the ALB on port 80; ECS port 8000 accepts traffic from the ALB security group; PostgreSQL port 5432 accepts traffic from the ECS security group.
-- **Secrets:** Terraform generates a database password and stores database connection fields in AWS Secrets Manager. ECS injects those fields into the backend task.
-- **IAM:** ECS execution/task roles are separate from the GitHub Actions deployment role. The deployment role uses OIDC rather than stored AWS access keys.
-- **Encryption:** RDS storage encryption is enabled.
-- **Container:** the Dockerfile uses a multi-stage build and runs the application as a non-root user.
-- **Image hygiene:** `.dockerignore` excludes unnecessary build-context files.
-
-### Security limitations to address
-
-This is an assessment configuration, not a production security baseline:
-
-- The ALB and S3 static website use HTTP. Add HTTPS with ACM and an appropriate delivery layer such as CloudFront before production.
-- The S3 website bucket allows public object reads by design. For a production frontend, consider CloudFront with private S3 origin access instead.
-- `ALLOWED_ORIGINS` is currently set to `*`. Restrict it to the actual frontend origin for deployment.
-- ECS tasks are assigned public IPs in public subnets to avoid the cost and complexity of a NAT Gateway. For a production design, use private subnets and plan controlled egress.
-- Review IAM policies and trust conditions against the exact repository and required actions. Avoid broad permissions where resource-scoped permissions are supported.
-- Terraform state may contain sensitive values. Use a protected remote state backend with encryption, access controls, and state locking for shared or production environments. Do not commit `terraform.tfstate`, `.terraform/`, or `terraform.tfvars`.
-- The RDS configuration has a short backup retention period and disables deletion protection for assessment cleanup. Change these settings for persistent environments.
-
-## Logging and monitoring
-
-- **Application logs:** ECS sends container logs to the CloudWatch log group `/<project_name>/backend`, with seven-day retention.
-- **Container Insights:** enabled on the ECS cluster.
-- **Health checks:** the API exposes `/api/health`; both the container and ALB target group use health checks.
-- **Example alarm:** CloudWatch monitors average ECS service CPU utilization and enters alarm state when it exceeds 80% over a five-minute period.
-
-The alarm is an example and does not currently configure an SNS notification target. For operational alerting, connect it to an SNS topic and a monitored notification channel.
-
-## Key decisions and trade-offs
-
-- **AWS:** AWS provides managed services for compute, registry, database, secrets, logging, and static hosting in one cloud environment.
-- **Terraform split by concern:** network, compute, database, IAM, storage, security, monitoring, variables, and outputs are kept in separate files for readability and maintainability. They are organized by concern rather than extracted into reusable child modules.
-- **ECS Fargate:** avoids managing EC2 hosts, at the cost of per-task compute charges and less host-level control.
-- **RDS PostgreSQL:** uses a managed relational database instead of maintaining a database container in the cloud.
-- **S3 website hosting:** is simple and low-overhead for a static demo, but the website endpoint is HTTP and public.
-- **No NAT Gateway:** private database subnets do not require outbound internet access in this design. ECS runs in public subnets with public IPs to keep the assessment setup simpler and avoid NAT Gateway charges.
-- **Small test suite:** the pipeline demonstrates a test stage without attempting comprehensive application coverage, consistent with the assessment.
-- **Cost-aware defaults:** the database uses a small configurable instance class, log retention is seven days, ECR retains five recent images, and the ECS service initially has zero desired tasks. These settings reduce some ongoing costs but do not make the deployment cost-free.
-
-## Production considerations
-
-For production, run ECS tasks in private subnets behind an HTTPS-enabled ALB, serve the frontend through CloudFront with a private S3 origin, and restrict CORS to the approved frontend domain. Enable Multi-AZ RDS, longer point-in-time recovery/backup retention, deletion protection, and a tested restore process. Add autoscaling, deployment and database alarms, SNS notifications, centralized dashboards, vulnerability-management gates, and more comprehensive tests. Store Terraform state in a secured remote backend and use separate accounts or environments with reviewed IAM boundaries. Estimate costs before enabling high availability: multiple tasks, Multi-AZ database deployment, load balancing, logging, and data transfer increase the monthly spend. The assessment configuration prioritizes a clear, repeatable demonstration over full resilience and production hardening.
-
-## Cleanup
-
-After capturing any evidence needed for submission, remove the assessment resources to avoid ongoing charges:
+To remove the AWS resources created by Terraform, run:
 
 ```bash
 cd terraform
 terraform destroy
 ```
 
-Review the destroy plan before confirming. Back up any evidence or data you need first. The S3 bucket is configured with `force_destroy = true`, and the RDS instance skips its final snapshot, so objects and database data may be permanently deleted. Remove the GitHub Actions repository variable if it is no longer needed.
+Review the proposed deletions and confirm when prompted.
 
-## Troubleshooting
+> **Warning:** Destroying the infrastructure can permanently remove resources and associated data. Back up any data you need before proceeding.
 
-- **GitHub Actions cannot assume the role:** verify the OIDC provider exists, `AWS_ROLE_ARN` is set as a repository variable, and the IAM trust policy matches the exact `OWNER/REPOSITORY` and `main` branch.
-- **ECS tasks fail to start:** check the ECS service events, task stopped reason, ECR image, execution-role permissions, and CloudWatch logs. Confirm that the first successful workflow run has registered a real image revision.
-- **Frontend cannot reach the API:** check `frontend/config.js`, the ALB endpoint, target health, security groups, and browser console. CORS must permit the frontend's origin.
-- **Database connection errors:** verify the Secrets Manager fields, RDS status, database security-group ingress from ECS, and application logs.
-- **Terraform reports the GitHub OIDC provider is missing:** create the GitHub Actions OIDC provider in IAM before running Terraform, because this configuration references it as an existing provider.
-- **Unexpected AWS charges:** inspect the deployed resources and run `terraform destroy` when the assessment is complete.
+## 6. Important Deployment Notes
+
+### ECS Desired Count and GitHub Actions
+
+The current Terraform configuration sets the ECS service's desired task count to `0`. Consequently, running `terraform apply` can return the service to zero desired tasks if that value is defined in the Terraform configuration.
+
+After applying infrastructure changes, trigger the GitHub Actions deployment workflow to deploy or restore the application, according to the workflow's implementation.
+
+**Important:** Verify the workflow behavior before relying on this process. A Terraform apply does not inherently trigger GitHub Actions, and a GitHub Actions run will only restore the service if the workflow explicitly deploys the task or updates the desired count.
+
+## 7. Architecture Explanation
+
+### Why AWS Fargate?
+
+Since the application requires containerized workloads rather than direct management of individual EC2 instances, I selected Amazon ECS with AWS Fargate.
+
+Fargate is a serverless compute engine for containers. It removes the need to provision and manage the underlying container-hosting EC2 instances.
+
+The application uses an ECS cluster and service to manage its containerized workloads, with Fargate as the compute launch type.
+
+### Why a Load Balancer?
+
+An Application Load Balancer (ALB) provides an entry point for incoming API requests and routes them to the backend targets registered with it.
+
+The ALB is configured across two public subnets, providing a multi-Availability Zone entry point. This configuration alone does not guarantee application high availability; the number and placement of healthy backend tasks and the database configuration also matter.
+
+### Why Terraform?
+
+Terraform provisions and manages the AWS infrastructure through code. This makes the deployment repeatable, allows infrastructure changes to be reviewed, and reduces the need for manual resource creation.
+
+### Why GitHub Actions?
+
+GitHub Actions automates the deployment workflow when changes are pushed to the configured branch.
+
+Combined with GitHub OIDC and AWS IAM, it allows the workflow to obtain AWS credentials through role assumption rather than relying on long-lived AWS access keys stored in GitHub.
+
+### Monitoring and Alerting
+
+Amazon CloudWatch is used for logging and monitoring.
+
+Due to time constraints, I did not implement the final alert-notification stage. Given more time, I would integrate Amazon Simple Notification Service (SNS) with CloudWatch alarms to send email notifications when predefined thresholds or failure conditions are reached.
+
+## 8. Potential Improvements for Production
+
+The current architecture is designed for an assessment, with an emphasis on demonstrating containerization, infrastructure automation, and CI/CD. A production environment would require additional measures to improve scalability, cost efficiency, security, and availability.
+
+### 8.1 Scalability
+
+The current setup uses a small Fargate service and a single RDS database instance.
+
+For a production deployment, I would consider the following improvements:
+
+* **ECS service auto scaling:** Run at least two tasks and scale the service according to CPU utilization, memory utilization, or request volume.
+* **Database read scaling:** Evaluate Amazon Aurora PostgreSQL and read replicas where workload characteristics justify them.
+* **CloudFront:** Distribute frontend content through CloudFront to reduce latency and improve content delivery. Depending on the routing design, CloudFront could also provide a distribution layer for API traffic.
+* **Load testing:** Establish performance baselines and use representative workloads to determine scaling thresholds and resource requirements.
+
+### 8.2 Cost Optimization
+
+The assessment intentionally uses a cost-conscious configuration, including a small database instance, a limited number of application tasks, and short log-retention periods.
+
+For production, I would evaluate the following trade-offs:
+
+* **Fargate capacity:** Select task sizes based on measured workloads and evaluate Savings Plans for predictable, sustained usage.
+* **NAT Gateway:** Place application tasks in private subnets and provide controlled outbound connectivity through NAT gateways where required. A NAT Gateway in each Availability Zone can improve resilience but adds cost.
+* **Amazon RDS:** Enable Multi-AZ deployment where the availability requirements justify the additional expense.
+* **Log retention and archival:** Retain operational logs in CloudWatch according to incident-response and compliance requirements, and export or archive suitable logs to Amazon S3 when appropriate.
+* **Cost monitoring:** Configure AWS Budgets and cost alerts to identify unexpected spending.
+
+### 8.3 High Availability and Resilience
+
+The ALB spans two subnets, but additional configuration is needed to eliminate other single points of failure.
+
+I would consider these improvements:
+
+* **Multiple ECS tasks:** Run at least two tasks across separate Availability Zones, preferably in private subnets.
+* **Multi-AZ database deployment:** Enable Multi-AZ for RDS to support database failover. Actual recovery time depends on the database configuration and failure scenario.
+* **Remote Terraform state:** Store Terraform state in an S3 backend and configure state locking using a supported mechanism, such as S3 lock files or a compatible locking solution. This avoids relying on a local state file and supports collaborative infrastructure management.
+* **HTTPS:** Configure an ACM certificate on the ALB and use HTTPS for public traffic. Configure the frontend hosting and delivery layer to use HTTPS as well.
+* **S3 versioning:** Enable versioning for the frontend bucket to help recover from accidental overwrites or deletions.
+* **Disaster recovery:** Consider Route 53 failover and a standby AWS Region if the required recovery time objective (RTO) and recovery point objective (RPO) justify the cost and operational complexity.
+
+These improvements would help the application tolerate individual component or Availability Zone failures and respond to increasing demand. The final design should be based on explicit availability, performance, security, and recovery requirements.
+
+## 9. Conclusion
+
+This project demonstrates how to deploy a containerized web application on AWS using Docker, Amazon ECS with Fargate, Amazon ECR, Amazon RDS, Amazon S3, Terraform, and GitHub Actions.
+
+It also demonstrates how Infrastructure as Code and CI/CD automation can make cloud deployments repeatable and easier to manage.
+
+Although the current implementation focuses on the requirements of an assessment, the proposed production improvements provide a roadmap for strengthening scalability, availability, security, observability, and cost management.
