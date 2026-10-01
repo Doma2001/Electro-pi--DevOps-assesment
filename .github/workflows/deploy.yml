@@ -1,0 +1,144 @@
+name: Build, Test and Deploy
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+env:
+  AWS_REGION: eu-central-1
+  PROJECT_NAME: cloud-devops-assessment
+  ECS_CLUSTER: cloud-devops-assessment-cluster
+  ECS_SERVICE: cloud-devops-assessment-service
+  ECR_REPOSITORY: cloud-devops-assessment-backend
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install -r app/requirements-dev.txt
+
+      - name: Build application
+        run: python -m compileall -q app
+
+      - name: Test
+        working-directory: app
+        run: pytest -q
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve AWS resources
+        id: resources
+        shell: bash
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+          echo "bucket=${PROJECT_NAME}-frontend-${ACCOUNT_ID}" >> "$GITHUB_OUTPUT"
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names "${PROJECT_NAME}-alb" \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+          test -n "$ALB_DNS" && test "$ALB_DNS" != "None"
+          echo "alb_dns=$ALB_DNS" >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker build -t "$IMAGE_URI" -t "$REGISTRY/$ECR_REPOSITORY:latest" ./app
+          docker push "$IMAGE_URI"
+          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+
+      - name: Register new ECS task definition revision
+        id: task-def
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition "${PROJECT_NAME}-backend" \
+            --query 'taskDefinition' \
+            --output json)
+
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
+            --arg IMAGE "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            '.containerDefinitions[0].image = $IMAGE
+             | del(
+                 .taskDefinitionArn,
+                 .revision,
+                 .status,
+                 .requiresAttributes,
+                 .compatibilities,
+                 .registeredAt,
+                 .registeredBy,
+                 .enableFaultInjection
+               )')
+
+          echo "$NEW_TASK_DEF" > /tmp/task-def.json
+
+          REVISION_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "arn=$REVISION_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered task definition: $REVISION_ARN"
+
+      - name: Deploy backend to ECS Fargate
+        shell: bash
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "${{ steps.task-def.outputs.arn }}" \
+            --desired-count 1 \
+            --force-new-deployment \
+            >/tmp/ecs-update.json
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+      - name: Render frontend API config
+        env:
+          ALB_DNS: ${{ steps.resources.outputs.alb_dns }}
+        run: |
+          sed "s#__API_BASE_URL__#http://${ALB_DNS}#" frontend/config.js > /tmp/config.js
+          mv /tmp/config.js frontend/config.js
+
+      - name: Publish frontend
+        env:
+          BUCKET: ${{ steps.resources.outputs.bucket }}
+        run: aws s3 sync frontend "s3://${BUCKET}" --delete
+
+      - name: Deployment summary
+        env:
+          ALB_DNS: ${{ steps.resources.outputs.alb_dns }}
+          BUCKET: ${{ steps.resources.outputs.bucket }}
+        run: |
+          echo "Backend: http://${ALB_DNS}/api/health"
+          echo "Frontend: http://${BUCKET}.s3-website-${AWS_REGION}.amazonaws.com"
