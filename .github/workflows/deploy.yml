@@ -141,4 +141,4 @@ jobs:
           BUCKET: ${{ steps.resources.outputs.bucket }}
         run: |
           echo "Backend: http://${ALB_DNS}/api/health"
-          echo "Frontend: http://${BUCKET}.s3-website-${AWS_REGION}.amazonaws.com"
+          echo "Frontend: http://${BUCKET}.s3-website.${AWS_REGION}.amazonaws.com"
