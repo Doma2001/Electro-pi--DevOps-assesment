@@ -16,13 +16,16 @@ Based on these recommendations, I designed an architecture with some modificatio
 
 The following diagram illustrates the proposed architecture, inspired by AWS best practices, with modifications specific to this project.
 
-<!-- IMAGE PLACEHOLDER 1: Proposed Architecture -->
+<!-- IMAGE PLACEHOLDER 1: Proposed_Architecture -->
+![My Image Description](Proposed_Architecture.png)
+
 
 ### 2.2 Full Cloud Architecture
 
 The following diagram presents the full architecture implemented for the cloud deployment, including the AWS services and deployment workflow.
 
-<!-- IMAGE PLACEHOLDER 2: Full Cloud Architecture -->
+<!-- IMAGE PLACEHOLDER 2: Full_Cloud_Architecture -->
+![My Image Description](Full_Cloud_Architecture.png)
 
 > **Note:** Replace the image filenames above with the actual filenames of your diagrams. Keep the images in the repository root or update the paths accordingly.
 
